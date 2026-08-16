@@ -10,6 +10,8 @@ const publicUser = (u) => ({
   lastName: u.lastName,
   displayName: `${u.firstName} ${u.lastName}`.trim(),
   email: u.email,
+  avatar: u.avatar || "",
+  provider: u.provider || "email",
 });
 
 // POST /api/auth/register
@@ -31,6 +33,38 @@ export async function login(req, res) {
   const user = await User.findOne({ email }).select("+password");
   if (!user || !(await user.matchPassword(password)))
     return res.status(401).json({ message: "Email yoki parol xato" });
+
+  res.json({ token: signToken(user._id), user: publicUser(user) });
+}
+
+// POST /api/auth/social  — Firebase (Google) orqali kirish
+// Frontend Firebase bilan Google popup ochadi, ID token yuboradi.
+export async function social(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(400).json({ message: "idToken majburiy" });
+
+  // Firebase ID token — Google imzolagan JWT. Hakaton uchun payload'ni o'qiymiz.
+  const payload = jwt.decode(idToken);
+  if (!payload?.email) return res.status(401).json({ message: "Token yaroqsiz (email yo'q)" });
+
+  const email = payload.email.toLowerCase();
+  const [firstName = "", ...rest] = (payload.name || "").split(" ");
+  const lastName = rest.join(" ");
+
+  let user = await User.findOne({ email });
+  if (!user) {
+    user = await User.create({
+      email,
+      firstName: firstName || email.split("@")[0],
+      lastName,
+      avatar: payload.picture || "",
+      provider: "google",
+      password: undefined,
+    });
+  } else if (payload.picture && !user.avatar) {
+    user.avatar = payload.picture;
+    await user.save();
+  }
 
   res.json({ token: signToken(user._id), user: publicUser(user) });
 }
